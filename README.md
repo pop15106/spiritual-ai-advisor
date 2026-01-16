@@ -14,6 +14,7 @@
 - ⭐ **西洋占星** - 行星位置與相位計算
 - 🌙 **紫微斗數** - 十二宮位主星分析
 - 🤖 **AI 解讀** - 整合 Google Gemini AI 提供專業解讀
+- 🔧 **後台管理** - 內建管理員系統、API Key 管理與使用量追蹤
 
 ## 🚀 快速開始
 
@@ -46,11 +47,10 @@ cp .env.example .env
 編輯 `.env` 檔案：
 
 ```env
-# 單一 API Key
-GOOGLE_API_KEY=your_api_key_here
-
-# 或多個 API Keys (逗號分隔，支援自動輪替)
+# 多個 API Keys (逗號分隔，支援自動輪替)
 GOOGLE_API_KEYS=key1,key2,key3
+# JWT 密鑰
+JWT_SECRET=your_jwt_secret
 ```
 
 ### 啟動服務
@@ -59,35 +59,43 @@ GOOGLE_API_KEYS=key1,key2,key3
 python api.py
 ```
 
-API 服務將在 [http://localhost:5001](http://localhost:5001) 啟動。
+API 服務將在 [http://localhost:5000](http://localhost:5000) 啟動 (注意：通訊埠已改為 5000)。
 
 ## 📡 API 端點
 
+### 🔮 命理功能
 | 端點 | 方法 | 說明 |
 |------|------|------|
 | `/api/health` | GET | 健康檢查 |
 | `/api/tarot/draw` | POST | 抽塔羅牌 |
-| `/api/tarot/cards` | GET | 取得所有塔羅牌資料 |
 | `/api/bazi/calculate` | POST | 計算八字命盤 |
 | `/api/humandesign/calculate` | POST | 計算人類圖 |
-| `/api/humandesign/line-explanation` | POST | 取得閘門爻解釋 |
 | `/api/astrology/calculate` | POST | 計算占星盤 |
 | `/api/ziwei/calculate` | POST | 計算紫微斗數 |
 | `/api/integration/analysis` | POST | AI 綜合分析 |
+
+### 🔧 管理員後台
+| 端點 | 方法 | 說明 |
+|------|------|------|
+| `/api/admin/login` | POST | 管理員登入 |
+| `/api/admin/verify` | GET | 驗證 Token |
+| `/api/admin/api-key` | GET/PUT | 管理 API Keys |
+| `/api/admin/usage` | GET | 使用量詳細統計 |
+| `/api/admin/usage/summary` | GET | 使用量儀表板摘要 |
 
 ## 📁 專案結構
 
 ```
 spiritual-ai-advisor/
 ├── api.py              # 主要 API 伺服器 (Flask)
-├── app.py              # 備用入口 (Streamlit UI)
+├── auth.py             # 認證與權限管理 (JWT/SQLite)
+├── usage_tracker.py    # 使用量追蹤系統 (SQLite)
+├── data/               # 資料庫儲存目錄 (app.db)
 ├── gates_iching_data.py    # 64閘門易經資料
 ├── channels_data.py        # 36通道詳細資料
 ├── hd_gate_mapping.py      # 閘門對照與計算函數
-├── tarot_agent.py          # 塔羅牌代理程式
-├── bazi_agent.py           # 八字代理程式
-├── requirements.txt        # Python 依賴
-└── .env.example            # 環境變數範本
+├── ziwei_calculator.py     # 紫微斗數計算核心
+└── requirement.txt         # Python 依賴
 ```
 
 ## 🔧 相關專案
