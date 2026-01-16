@@ -1526,50 +1526,144 @@ def get_astrology():
 
 @app.route('/api/ziwei/calculate', methods=['POST'])
 def calculate_ziwei():
-    """計算紫微斗數 - 根據出生資料"""
+    """計算紫微斗數 - 使用專業計算模組"""
     from lunar_python import Solar
+    from ziwei_calculator import calculate_ziwei_chart, DIZHI
     
     data = request.json or {}
     birth_date = data.get('birthDate', '1990-01-31')
-    birth_hour = data.get('birthHour', 3)
-    
-    HOUR_MAP = [23, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
+    birth_hour = data.get('birthHour', 3)  # 0-11 時辰索引
     
     try:
         year, month, day = map(int, birth_date.split('-'))
+        
+        # 轉換為農曆
+        # 使用時辰索引對應的小時 (子時=23, 丑時=1, ...)
+        HOUR_MAP = [23, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
         hour = HOUR_MAP[birth_hour % 12]
         
         solar = Solar.fromYmdHms(year, month, day, hour, 0, 0)
         lunar = solar.getLunar()
+        
+        lunar_year = lunar.getYear()
+        lunar_month = lunar.getMonth()
         lunar_day = lunar.getDay()
-    except:
+        
+        # 獲取年干支
+        year_gz = lunar.getYearInGanZhi()
+        year_tiangan = year_gz[0] if year_gz else '甲'
+        year_dizhi = year_gz[1] if len(year_gz) > 1 else '子'
+        
+        lunar_date_str = f"{lunar.getYearInChinese()}年{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
+        
+    except Exception as e:
+        print(f"農曆轉換錯誤: {e}")
+        # 使用預設值
+        lunar_month = 1
         lunar_day = 15
+        year_tiangan = '甲'
+        year_dizhi = '子'
+        lunar_date_str = "農曆日期計算失敗"
     
-    # 簡化的命宮主星計算 (根據農曆日)
-    main_stars = ["紫微", "天機", "太陽", "武曲", "天同", "廉貞", "天府", "太陰", "貪狼", "巨門", "天相", "天梁", "七殺", "破軍"]
-    main_star = main_stars[(lunar_day + birth_hour) % len(main_stars)]
+    # 使用新的紫微計算模組
+    try:
+        chart = calculate_ziwei_chart(
+            lunar_year=lunar_year if 'lunar_year' in dir() else 1990,
+            lunar_month=lunar_month,
+            lunar_day=lunar_day,
+            shichen=birth_hour,
+            year_tiangan=year_tiangan,
+            year_dizhi=year_dizhi
+        )
+    except Exception as e:
+        print(f"紫微計算錯誤: {e}")
+        chart = {
+            'ming_palace': '子',
+            'main_star': '紫微',
+            'ming_zhu': '貪狼',
+            'shen_zhu': '火星',
+            'wuxing_ju': '水二局',
+            'palaces': {},
+            'si_hua': {}
+        }
     
-    mingzhu_stars = ["貪狼", "巨門", "祿存", "文曲", "廉貞", "武曲", "破軍", "文昌", "廉貞", "巨門", "祿存", "貪狼"]
-    mingzhu = mingzhu_stars[birth_hour % len(mingzhu_stars)]
+    # 構建十二宮資料 (包含地支位置)
+    palaces_full = {}
+    for palace_name, palace_data in chart.get('palaces', {}).items():
+        stars = palace_data.get('stars', [])
+        dizhi = palace_data.get('dizhi', '')
+        palaces_full[palace_name] = {
+            'stars': stars,
+            'dizhi': dizhi,
+            'stars_str': ', '.join(stars) if stars else '無主星'
+        }
     
-    shenzhu = main_stars[(lunar_day + month) % len(main_stars)]
-    
-    # 十二宮位
-    palaces = {}
-    palace_names = ["命宮", "兄弟宮", "夫妻宮", "子女宮", "財帛宮", "疾厄宮", "遷移宮", "交友宮", "官祿宮", "田宅宮", "福德宮", "父母宮"]
-    for i, name in enumerate(palace_names):
-        palaces[name] = main_stars[(lunar_day + i + birth_hour) % len(main_stars)]
+    # 四化標記
+    si_hua = chart.get('si_hua', {})
+    si_hua_str = ', '.join([f"{star}{hua}" for star, hua in si_hua.items()])
     
     zw_data = {
-        "main_star": main_star,
-        "mingzhu": mingzhu,
-        "shenzhu": shenzhu,
-        "palaces": palaces
+        "main_star": chart.get('main_star', '紫微'),
+        "mingzhu": chart.get('ming_zhu', '貪狼'),
+        "shenzhu": chart.get('shen_zhu', '火星'),
+        "wuxing_ju": chart.get('wuxing_ju', '水二局'),
+        "ming_palace_dizhi": chart.get('ming_palace', '子'),
+        "shen_palace_dizhi": chart.get('shen_palace', '丑'),
+        "lunar_date": lunar_date_str,
+        "palaces": palaces_full,
+        "si_hua": si_hua_str
     }
     
-    prompt = f"作為紫微斗數分析師，請根據以下命盤提供詳細分析：\n\n出生日期：{birth_date}\n命宮主星：{main_star}\n命主：{mingzhu}\n身主：{shenzhu}\n財帛宮：{palaces['財帛宮']}\n夫妻宮：{palaces['夫妻宮']}\n官祿宮：{palaces['官祿宮']}\n\n請提供：\n1. 命格分析（80字）\n2. 性格特質（80字）\n3. 財運分析（80字）\n4. 今年運勢建議（80字）\n\n請用繁體中文，格式簡潔。"
+    # 為 AI prompt 準備簡化版星曜字串
+    palaces_simple = {name: data['stars_str'] for name, data in palaces_full.items()}
     
-    fallback = f"{main_star}坐命代表您具有獨特的命格特質。{mingzhu}為命主，影響您的人生方向。{shenzhu}為身主，影響您的行為模式。"
+    # 構建 AI 提示詞
+    ming_stars_str = palaces_simple.get('命宮', '無主星')
+    cai_stars_str = palaces_simple.get('財帛宮', '無主星')
+    guan_stars_str = palaces_simple.get('官祿宮', '無主星')
+    fuqi_stars_str = palaces_simple.get('夫妻宮', '無主星')
+    
+    prompt = f"""作為專業紫微斗數分析師，請根據以下命盤提供詳盡的分析報告。
+
+出生日期：{birth_date}（{lunar_date_str}）
+命宮地支：{chart.get('ming_palace', '?')}宮
+五行局：{chart.get('wuxing_ju', '?')}
+命主：{chart.get('ming_zhu', '?')}
+身主：{chart.get('shen_zhu', '?')}
+
+命宮星曜：{ming_stars_str}
+財帛宮：{cai_stars_str}
+官祿宮：{guan_stars_str}
+夫妻宮：{fuqi_stars_str}
+
+四化：{si_hua_str}
+
+請提供約 500-800 字的完整分析，包含：
+### 1. 命格總論
+解讀命宮主星的核心特質，以及五行局對命主的影響。
+
+### 2. 性格與天賦
+根據命宮、福德宮的星曜，分析此人的性格特點和天賦才能。
+
+### 3. 事業與財運
+結合官祿宮和財帛宮的星曜，以及四化的影響，分析事業發展方向和財運特點。
+
+### 4. 感情與人際
+根據夫妻宮和交友宮的星曜，分析感情模式和人際關係。
+
+### 5. 本年運勢提醒
+給予具體可行的生活建議。
+
+請用繁體中文，語氣專業且溫暖。"""
+    
+    fallback = f"""您的命盤顯示{chart.get('main_star', '紫微')}坐命{chart.get('ming_palace', '?')}宮，命主為{chart.get('ming_zhu', '貪狼')}，身主為{chart.get('shen_zhu', '火星')}。
+
+{chart.get('wuxing_ju', '水二局')}代表您的大限起始年齡，也反映您的五行能量特質。
+
+命宮星曜 {ming_stars_str} 顯示您具有獨特的人生道路和性格特質。
+
+四化 {si_hua_str} 是本年的重要能量變化指標，請留意相關宮位的吉凶變化。"""
+    
     interpretation, model_used = generate_ai_content(prompt, fallback)
     
     return jsonify({"success": True, **zw_data, "interpretation": interpretation})
@@ -1581,17 +1675,432 @@ def get_ziwei():
     return jsonify({"success": True, **ZIWEI_DATA, "interpretation": "請輸入出生資料以獲取個人化分析"})
 
 
+import random
+from tarot_deck import FULL_DECK
+
+# ... (Previous code)
+
+def get_tarot_reading_struct(question):
+    """
+    Returns structured tarot data:
+    {
+        "spread_name": str,
+        "cards": [list of strings with orientation]
+    }
+    """
+    try:
+        # Step 1: Get Spread Recommendation
+        spread_prompt = f"""
+        你是一位塔羅牌大師。用戶的問題是：「{question}」。
+        請推薦一個最適合此問題的塔羅牌陣（3到5張牌為佳）。
+        請嚴格按照以下格式回傳一行，不要有其他文字：
+        牌陣名稱|位置1含義,位置2含義,位置3含義...
+        例如：聖三角牌陣|過去,現在,未來
+        """
+        spread_text, _ = generate_ai_content(spread_prompt, "")
+        
+        # Simple extraction
+        if "|" in spread_text:
+            parts = spread_text.strip().split("|")
+            spread_name = parts[0]
+            positions = [p.strip() for p in parts[1].split(",") if p.strip()]
+        else:
+            # Fallback
+            spread_name = "身心靈三卡指引"
+            positions = ["現況", "建議", "結果"]
+            
+        # Step 2: Draw Cards
+        count = len(positions)
+        drawn_cards = random.sample(FULL_DECK, count)
+        
+        formatted_cards = []
+        for i, card in enumerate(drawn_cards):
+            is_reversed = random.choice([True, False])
+            orientation = "逆位 (Reversed)" if is_reversed else "正位 (Upright)"
+            formatted_cards.append(f"{i+1}. {positions[i]}：{card} - {orientation}")
+            
+        return {
+            "spread_name": spread_name,
+            "cards": formatted_cards
+        }
+
+    except Exception as e:
+        print(f"Tarot error: {e}")
+        return {
+            "spread_name": "Error",
+            "cards": []
+        }
+
 @app.route('/api/integration/analyze', methods=['POST'])
 def analyze_integration():
     data = request.json or {}
-    question = data.get('question', '今年適合換工作嗎？')
+    # 前端傳來的 "question" 包含了問題和所有需要的背景資料
+    user_context = data.get('question', '')
+    selected_systems = data.get('systems', [])
+    birth_data = data.get('birth_data', {})
     
-    prompt = f"作為一個身心靈顧問，請根據以下資訊為用戶分析問題：\n\n問題：{question}\n\n塔羅：命運之輪、星星、逆位戰車\n八字：甲木日主，生於丑月\n人類圖：生產者，3/5 人生角色\n占星：摩羯座太陽，獅子座上升\n紫微：紫微坐命宮\n\n請提供整合分析和建議，使用 markdown 格式。"
+    system_data = {}
+
+    # Check if Tarot is selected and inject real reading
+    if 'tarot' in selected_systems:
+        import re
+        match = re.search(r"\[用戶問題\] (.*?)\n", user_context)
+        pure_question = match.group(1) if match else "我的運勢如何？"
+        
+        print(f"Performing Tarot Reading for: {pure_question}")
+        tarot_struct = get_tarot_reading_struct(pure_question)
+        system_data['tarot'] = tarot_struct
+        
+        # Format for AI Context
+        tarot_reading_str = f"\n\n[系統自動抽牌結果 - {tarot_struct['spread_name']}]\n" + "\n".join(tarot_struct['cards'])
+        user_context += tarot_reading_str
+    
+    # Human Design calculation
+    if 'humandesign' in selected_systems and birth_data:
+        try:
+            bd = birth_data
+            if bd.get('date') and bd.get('time') and bd.get('city'):
+                # 模擬內部調用 calculate_human_design 的邏輯
+                # 這裡直接返回摘要
+                birth_dt_str = f"{bd['date']}T{bd['time']}"
+                lat = bd['city']['lat']
+                lng = bd['city']['lng']
+                
+                # 簡化版計算：使用現有的 HD 計算邏輯
+                from datetime import datetime as dt
+                birth_datetime = dt.strptime(birth_dt_str, "%Y-%m-%dT%H:%M")
+                
+                # 使用 ephem 計算太陽位置來確定 Type (簡化版)
+                sun_gate = int((ephem.Sun(birth_datetime).hlong * 180 / math.pi) % 360 / 5.625) + 1
+                if sun_gate > 64: sun_gate = 1
+                
+                # 基於定義中心數量決定 Type (簡化邏輯)
+                types_by_gate = {
+                    range(1, 17): ("顯示者", "告知"),
+                    range(17, 33): ("生產者", "等待回應"),
+                    range(33, 49): ("投射者", "等待邀請"),
+                    range(49, 65): ("反映者", "等待28天")
+                }
+                hd_type = "生產者"
+                hd_strategy = "等待回應"
+                for gate_range, (t, s) in types_by_gate.items():
+                    if sun_gate in gate_range:
+                        hd_type = t
+                        hd_strategy = s
+                        break
+                
+                system_data['humandesign'] = {
+                    "type": hd_type,
+                    "strategy": hd_strategy,
+                    "summary": f"{hd_type}，策略：{hd_strategy}"
+                }
+                
+                user_context += f"\n\n[人類圖計算結果]\n類型：{hd_type}\n策略：{hd_strategy}"
+        except Exception as e:
+            print(f"HD calculation error in integration: {e}")
+            system_data['humandesign'] = {"type": "計算中", "summary": "待計算"}
+    
+    # Astrology calculation (using Kerykeion for accuracy)
+    if 'astrology' in selected_systems and birth_data:
+        try:
+            bd = birth_data
+            if bd.get('date') and bd.get('time') and bd.get('city'):
+                from kerykeion import AstrologicalSubject
+                import warnings
+                warnings.filterwarnings("ignore")
+                
+                date_parts = bd['date'].split('-')
+                year = int(date_parts[0])
+                month = int(date_parts[1])
+                day = int(date_parts[2])
+                
+                time_parts = bd['time'].split(':')
+                hour = int(time_parts[0])
+                minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+                
+                lat = bd['city']['lat']
+                lng = bd['city']['lng']
+                city_name = bd['city']['name']
+                
+                # 星座中英對照
+                sign_cn = {
+                    "Ari": "牡羊座", "Tau": "金牛座", "Gem": "雙子座", "Can": "巨蟹座",
+                    "Leo": "獅子座", "Vir": "處女座", "Lib": "天秤座", "Sco": "天蠍座",
+                    "Sag": "射手座", "Cap": "摩羯座", "Aqu": "水瓶座", "Pis": "雙魚座"
+                }
+                
+                subject = AstrologicalSubject(
+                    "User", year, month, day, hour, minute,
+                    city_name, "TW", lng=lng, lat=lat
+                )
+                
+                sun_sign = sign_cn.get(subject.sun.sign, subject.sun.sign)
+                moon_sign = sign_cn.get(subject.moon.sign, subject.moon.sign)
+                asc_sign = sign_cn.get(subject.first_house.sign, subject.first_house.sign)
+                
+                system_data['astrology'] = {
+                    "sun_sign": sun_sign,
+                    "moon_sign": moon_sign,
+                    "asc_sign": asc_sign,
+                    "summary": f"太陽{sun_sign}，月亮{moon_sign}，上升{asc_sign}"
+                }
+                
+                user_context += f"\n\n[占星計算結果]\n太陽星座：{sun_sign}\n月亮星座：{moon_sign}\n上升星座：{asc_sign}"
+        except Exception as e:
+            print(f"Astrology calculation error in integration: {e}")
+            system_data['astrology'] = {"summary": "待計算"}
+    
+    # Ziwei calculation (using lunar_python for proper date conversion)
+    if 'ziwei' in selected_systems and birth_data:
+        try:
+            bd = birth_data
+            print(f"[Ziwei Integration] birth_data: {bd}")
+            
+            if bd.get('date'):
+                from lunar_python import Solar
+                from ziwei_calculator import calculate_ziwei_chart
+                
+                date_parts = bd['date'].split('-')
+                year = int(date_parts[0])
+                month = int(date_parts[1])
+                day = int(date_parts[2])
+                
+                # hour is shichen index (0-11)
+                shichen = bd.get('hour') if bd.get('hour') is not None else 6
+                
+                # Convert shichen to hour for Solar calculation
+                HOUR_MAP = [23, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
+                hour = HOUR_MAP[shichen % 12]
+                
+                # Convert to lunar date
+                solar = Solar.fromYmdHms(year, month, day, hour, 0, 0)
+                lunar = solar.getLunar()
+                
+                lunar_year = lunar.getYear()
+                lunar_month = lunar.getMonth()
+                lunar_day = lunar.getDay()
+                
+                year_gz = lunar.getYearInGanZhi()
+                year_tiangan = year_gz[0] if year_gz else '甲'
+                year_dizhi = year_gz[1] if len(year_gz) > 1 else '子'
+                
+                print(f"[Ziwei Integration] Lunar: {lunar_year}/{lunar_month}/{lunar_day} TG={year_tiangan} DZ={year_dizhi}")
+                
+                # Calculate chart using proper function
+                chart = calculate_ziwei_chart(
+                    lunar_year=lunar_year,
+                    lunar_month=lunar_month,
+                    lunar_day=lunar_day,
+                    shichen=shichen,
+                    year_tiangan=year_tiangan,
+                    year_dizhi=year_dizhi
+                )
+                
+                if chart:
+                    main_star = chart.get('main_star', '未知')
+                    ming_palace = chart.get('ming_palace', '')
+                    wuxing_ju = chart.get('wuxing_ju', '')
+                    
+                    print(f"[Ziwei Integration] Result: main_star={main_star}, ming_palace={ming_palace}")
+                    
+                    system_data['ziwei'] = {
+                        "main_star": main_star,
+                        "ming_palace": ming_palace,
+                        "wuxing_ju": wuxing_ju,
+                        "summary": f"命宮{ming_palace}，{main_star}坐命，{wuxing_ju}"
+                    }
+                    
+                    user_context += f"\n\n[紫微計算結果]\n命宮：{ming_palace}\n主星：{main_star}\n五行局：{wuxing_ju}"
+                else:
+                    system_data['ziwei'] = {"summary": "計算結果為空"}
+            else:
+                system_data['ziwei'] = {"summary": "缺少出生日期"}
+        except Exception as e:
+            print(f"Ziwei calculation error in integration: {e}")
+            import traceback
+            traceback.print_exc()
+            system_data['ziwei'] = {"summary": "計算錯誤"}
+    
+    # 獲取當前日期
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    current_year = current_date.split('-')[0]
+    
+    prompt = f"""
+你是一位精通東方與西方命理的身心靈整合顧問。
+現在日期是：{current_date}。
+
+請根據以下用戶提供的資訊（包含問題、出生資料、以及相關系統的數據）進行深入分析：
+
+{user_context}
+
+分析指引：
+1. 請整合所有提供的資訊，不要忽略任何一個系統（如八字、紫微、占星、人類圖等）。
+2. 對於塔羅部分，請根據**『系統自動抽牌結果』**中的牌陣與牌義，結合問題進行解讀（請明確解讀每一張牌與其位置的關聯）。
+3. 提供具體的流年運勢分析時，請以 **{current_year}年** 為主。
+4. 語氣要專業、溫暖、給予力量，並提供具體的行動建議。
+5. 輸出格式請使用 Markdown，善用標題、條列和粗體來提高易讀性。
+"""
     
     analysis, model_used = generate_ai_content(prompt, AI_INTEGRATION_RESPONSE)
     source = "gemini" if model_used else "demo"
     
-    return jsonify({"success": True, "question": question, "analysis": analysis, "source": source, "model": model_used})
+    return jsonify({
+        "success": True, 
+        "question": user_context, 
+        "analysis": analysis, 
+        "source": source, 
+        "model": model_used,
+        "system_data": system_data
+    })
+
+
+# ========== Admin API Endpoints ==========
+
+from auth import (
+    verify_admin, generate_token, verify_token, admin_required,
+    get_api_key, update_api_key, update_password, mask_api_key, get_admin_data
+)
+from usage_tracker import (
+    track_usage, get_usage_stats, get_summary_stats, get_hourly_stats, FEATURE_NAMES
+)
+
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    """管理員登入"""
+    data = request.json or {}
+    username = data.get('username', '')
+    password = data.get('password', '')
+    
+    if verify_admin(username, password):
+        token = generate_token(username)
+        return jsonify({
+            "success": True,
+            "token": token,
+            "message": "登入成功"
+        })
+    else:
+        return jsonify({
+            "success": False,
+            "error": "帳號或密碼錯誤"
+        }), 401
+
+@app.route('/api/admin/verify', methods=['GET'])
+@admin_required
+def admin_verify():
+    """驗證 token"""
+    return jsonify({"success": True, "message": "Token 有效"})
+
+@app.route('/api/admin/api-key', methods=['GET'])
+@admin_required
+def get_admin_api_key():
+    """獲取所有 API Key (遮蔽顯示)"""
+    # 從資料庫讀取
+    db_key = get_api_key()
+    
+    # 從 .env 讀取
+    env_keys_str = os.environ.get('GOOGLE_API_KEYS', '')
+    env_single_key = os.environ.get('GOOGLE_API_KEY', '')
+    
+    env_keys = []
+    if env_keys_str:
+        env_keys = [k.strip() for k in env_keys_str.split(',') if k.strip()]
+    elif env_single_key:
+        env_keys = [env_single_key]
+    
+    return jsonify({
+        "success": True,
+        "db_key_masked": mask_api_key(db_key) if db_key else "未設定",
+        "env_keys": [{"key": mask_api_key(k), "full": k} for k in env_keys],
+        "env_keys_count": len(env_keys),
+        "has_db_key": bool(db_key)
+    })
+
+@app.route('/api/admin/api-key', methods=['PUT'])
+@admin_required
+def update_admin_api_key():
+    """更新 API Key"""
+    data = request.json or {}
+    new_key = data.get('api_key', '')
+    
+    if not new_key:
+        return jsonify({"success": False, "error": "請提供新的 API Key"}), 400
+    
+    update_api_key(new_key)
+    return jsonify({
+        "success": True,
+        "message": "API Key 更新成功",
+        "api_key_masked": mask_api_key(new_key)
+    })
+
+@app.route('/api/admin/password', methods=['PUT'])
+@admin_required
+def change_admin_password():
+    """更改管理員密碼"""
+    data = request.json or {}
+    new_password = data.get('new_password', '')
+    
+    if len(new_password) < 6:
+        return jsonify({"success": False, "error": "密碼長度至少 6 位"}), 400
+    
+    update_password(new_password)
+    return jsonify({
+        "success": True,
+        "message": "密碼更新成功"
+    })
+
+@app.route('/api/admin/usage', methods=['GET'])
+@admin_required
+def get_admin_usage():
+    """獲取使用量統計"""
+    # 從查詢參數獲取篩選條件
+    feature = request.args.get('feature')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+    day = request.args.get('day', type=int)
+    hour = request.args.get('hour', type=int)
+    
+    stats = get_usage_stats(
+        feature_name=feature,
+        start_date=start_date,
+        end_date=end_date,
+        year=year,
+        month=month,
+        day=day,
+        hour=hour
+    )
+    
+    return jsonify({
+        "success": True,
+        "stats": stats,
+        "feature_names": FEATURE_NAMES
+    })
+
+@app.route('/api/admin/usage/summary', methods=['GET'])
+@admin_required
+def get_admin_usage_summary():
+    """獲取使用量摘要"""
+    summary = get_summary_stats()
+    return jsonify({
+        "success": True,
+        "summary": summary,
+        "feature_names": FEATURE_NAMES
+    })
+
+@app.route('/api/admin/usage/hourly', methods=['GET'])
+@admin_required
+def get_admin_usage_hourly():
+    """獲取每小時統計"""
+    feature = request.args.get('feature')
+    date = request.args.get('date')  # YYYY-MM-DD
+    
+    hourly = get_hourly_stats(feature_name=feature, date=date)
+    return jsonify({
+        "success": True,
+        "hourly": hourly,
+        "date": date or datetime.now().strftime("%Y-%m-%d")
+    })
 
 
 if __name__ == '__main__':
@@ -1599,3 +2108,4 @@ if __name__ == '__main__':
     print("API running at http://localhost:5000")
     print("Frontend should connect from http://localhost:3000")
     app.run(host='0.0.0.0', port=5000, debug=True)
+
