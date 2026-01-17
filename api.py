@@ -2374,12 +2374,13 @@ def delete_reading_endpoint(user, reading_id):
 @user_required
 def get_user_trials(user):
     """Get remaining free trials for logged-in user"""
-    from db import get_user_free_trials
+    from db import get_user_trial_details
     
-    trials = get_user_free_trials(user["user_id"])
+    details = get_user_trial_details(user["user_id"])
     return jsonify({
         "success": True,
-        "freeTrials": trials
+        "freeTrials": details["total"],
+        "details": details
     })
 
 
