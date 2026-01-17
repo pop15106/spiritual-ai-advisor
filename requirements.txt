@@ -1,5 +1,14 @@
+flask
+flask-cors
 google-generativeai
+google-auth
+google-auth-oauthlib
 python-dotenv
-streamlit
 lunar-python
 plotly
+ephem
+PyJWT
+supabase
+psycopg2-binary
+gunicorn
+

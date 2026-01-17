@@ -22,6 +22,21 @@ from hd_gate_mapping import CHANNELS_LIST, GATE_TO_CENTER, get_gate_from_longitu
 
 load_dotenv()
 
+# ========== 啟動時同步資料庫中的 API Key ==========
+def sync_api_keys_from_db():
+    """從資料庫載入已儲存的 API Key 到環境變數"""
+    try:
+        from auth import get_api_key
+        saved_key = get_api_key()
+        if saved_key:
+            os.environ['GOOGLE_API_KEYS'] = saved_key
+            os.environ['GOOGLE_API_KEY'] = saved_key.split(',')[0].strip()
+            print(f"✅ 從資料庫載入 API Key: {saved_key[:10]}...")
+    except Exception as e:
+        print(f"⚠️ 載入資料庫 API Key 失敗: {e}")
+
+sync_api_keys_from_db()
+
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"], supports_credentials=True)
 
@@ -2103,9 +2118,257 @@ def get_admin_usage_hourly():
     })
 
 
+# ========== 用戶 API Key 驗證 ==========
+
+@app.route('/api/validate-key', methods=['POST'])
+def validate_user_api_key():
+    """驗證用戶提供的 API Key 是否有效"""
+    data = request.json or {}
+    user_key = data.get('api_key', '')
+    
+    if not user_key:
+        return jsonify({"success": False, "error": "請提供 API Key"}), 400
+    
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=user_key)
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
+        # 簡單的測試請求
+        response = model.generate_content("Say 'OK' if you can read this.")
+        
+        if response and response.text:
+            return jsonify({
+                "success": True,
+                "message": "API Key 驗證成功",
+                "key_preview": user_key[:6] + '...' + user_key[-4:] if len(user_key) > 10 else user_key
+            })
+        else:
+            return jsonify({"success": False, "error": "API Key 無效或無法使用"}), 400
+            
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "api_key" in error_msg or "invalid" in error_msg:
+            return jsonify({"success": False, "error": "API Key 格式無效"}), 400
+        elif "quota" in error_msg or "exhausted" in error_msg:
+            return jsonify({"success": False, "error": "API Key 配額已用盡"}), 400
+        else:
+            return jsonify({"success": False, "error": f"驗證失敗: {str(e)[:100]}"}), 400
+
+
+@app.route('/api/check-admin', methods=['GET'])
+def check_admin_status():
+    """檢查是否為已登入的管理員（用於前端判斷是否跳過 API Key 輸入）"""
+    token = None
+    if 'Authorization' in request.headers:
+        auth_header = request.headers['Authorization']
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+    
+    if token:
+        from auth import verify_token
+        payload = verify_token(token)
+        if payload:
+            return jsonify({"success": True, "isAdmin": True})
+    
+    return jsonify({"success": True, "isAdmin": False})
+
+
+# ========== User Authentication (Google OAuth) ==========
+
+@app.route('/api/auth/google', methods=['POST'])
+def google_auth():
+    """Verify Google ID token and create/login user"""
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
+    from db import get_or_create_user
+    import jwt as pyjwt
+    
+    data = request.json or {}
+    credential = data.get('credential', '')
+    
+    if not credential:
+        return jsonify({"success": False, "error": "Missing Google credential"}), 400
+    
+    try:
+        # Verify the Google ID token
+        client_id = os.getenv("GOOGLE_CLIENT_ID")
+        idinfo = id_token.verify_oauth2_token(
+            credential, 
+            google_requests.Request(), 
+            client_id
+        )
+        
+        # Extract user info
+        google_id = idinfo['sub']
+        email = idinfo.get('email', '')
+        name = idinfo.get('name', '')
+        picture = idinfo.get('picture', '')
+        
+        # Create or get user from database
+        user = get_or_create_user(google_id, email, name, picture)
+        
+        if not user:
+            return jsonify({"success": False, "error": "無法建立用戶帳號"}), 500
+        
+        # Generate JWT token for our app
+        jwt_secret = os.getenv("JWT_SECRET", "spiritual-advisor-secret")
+        token = pyjwt.encode({
+            "user_id": user["id"],
+            "email": email,
+            "exp": datetime.utcnow() + timedelta(days=7)
+        }, jwt_secret, algorithm="HS256")
+        
+        return jsonify({
+            "success": True,
+            "token": token,
+            "user": {
+                "id": user["id"],
+                "email": email,
+                "name": name,
+                "avatar": picture
+            }
+        })
+        
+    except ValueError as e:
+        return jsonify({"success": False, "error": f"Invalid token: {str(e)}"}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Authentication failed: {str(e)}"}), 500
+
+
+def get_current_user():
+    """Helper to get current user from JWT token"""
+    import jwt as pyjwt
+    
+    token = None
+    if 'Authorization' in request.headers:
+        auth_header = request.headers['Authorization']
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+    
+    if not token:
+        return None
+    
+    try:
+        jwt_secret = os.getenv("JWT_SECRET", "spiritual-advisor-secret")
+        payload = pyjwt.decode(token, jwt_secret, algorithms=["HS256"])
+        return payload
+    except:
+        return None
+
+
+def user_required(f):
+    """Decorator: requires user authentication"""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return jsonify({"success": False, "error": "請先登入"}), 401
+        return f(user, *args, **kwargs)
+    return decorated
+
+
+@app.route('/api/user/profile', methods=['GET'])
+@user_required
+def get_user_profile(user):
+    """Get current user profile"""
+    from db import get_user_by_id, get_reading_count
+    
+    user_data = get_user_by_id(user["user_id"])
+    if not user_data:
+        return jsonify({"success": False, "error": "User not found"}), 404
+    
+    counts = get_reading_count(user["user_id"])
+    
+    return jsonify({
+        "success": True,
+        "user": {
+            "id": user_data["id"],
+            "email": user_data["email"],
+            "name": user_data["name"],
+            "avatar": user_data.get("avatar_url", ""),
+            "hasApiKey": bool(user_data.get("api_key")),
+            "createdAt": user_data.get("created_at")
+        },
+        "readingCounts": counts
+    })
+
+
+@app.route('/api/user/api-key', methods=['PUT'])
+@user_required
+def update_user_api_key_endpoint(user):
+    """Update user's personal API key"""
+    from db import update_user_api_key
+    
+    data = request.json or {}
+    api_key = data.get('api_key', '')
+    
+    if update_user_api_key(user["user_id"], api_key):
+        return jsonify({"success": True, "message": "API Key 更新成功"})
+    return jsonify({"success": False, "error": "更新失敗"}), 500
+
+
+# ========== Reading History ==========
+
+@app.route('/api/readings', methods=['GET'])
+@user_required
+def get_readings(user):
+    """Get user's reading history"""
+    from db import get_user_readings
+    
+    reading_type = request.args.get('type')
+    limit = request.args.get('limit', 50, type=int)
+    
+    readings = get_user_readings(user["user_id"], reading_type, limit)
+    
+    return jsonify({
+        "success": True,
+        "readings": readings,
+        "total": len(readings)
+    })
+
+
+@app.route('/api/readings', methods=['POST'])
+@user_required
+def save_reading(user):
+    """Save a reading result"""
+    from db import save_reading as db_save_reading
+    
+    data = request.json or {}
+    reading_type = data.get('type', '')
+    result = data.get('result', {})
+    birth_data = data.get('birthData')
+    
+    if not reading_type or not result:
+        return jsonify({"success": False, "error": "Missing type or result"}), 400
+    
+    reading = db_save_reading(user["user_id"], reading_type, result, birth_data)
+    
+    if reading:
+        return jsonify({
+            "success": True,
+            "message": "讀取結果已儲存",
+            "reading": reading
+        })
+    return jsonify({"success": False, "error": "儲存失敗"}), 500
+
+
+@app.route('/api/readings/<int:reading_id>', methods=['DELETE'])
+@user_required
+def delete_reading_endpoint(user, reading_id):
+    """Delete a reading"""
+    from db import delete_reading
+    
+    if delete_reading(user["user_id"], reading_id):
+        return jsonify({"success": True, "message": "已刪除"})
+    return jsonify({"success": False, "error": "刪除失敗"}), 500
+
+
 if __name__ == '__main__':
     print("Starting Spiritual AI Advisor API...")
     print("API running at http://localhost:5000")
     print("Frontend should connect from http://localhost:3000")
     app.run(host='0.0.0.0', port=5000, debug=True)
+
+
 
