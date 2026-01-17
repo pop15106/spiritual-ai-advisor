@@ -180,16 +180,47 @@ def get_reading_count(user_id: int) -> Dict[str, int]:
 
 # ========== Free Trial Operations ==========
 
+def check_and_reset_daily_trials(user_id: int) -> None:
+    """Check if daily trials need reset (new day) and reset if necessary"""
+    supabase = get_supabase()
+    if not supabase:
+        return
+    
+    try:
+        result = supabase.table("users").select("last_reset_date").eq("id", user_id).execute()
+        if not result.data or len(result.data) == 0:
+            return
+        
+        last_reset = result.data[0].get("last_reset_date")
+        today = datetime.now().date().isoformat()
+        
+        # If last reset was before today, reset daily trials
+        if last_reset is None or str(last_reset) < today:
+            supabase.table("users").update({
+                "daily_trials": 5,
+                "last_reset_date": today,
+                "updated_at": datetime.now().isoformat()
+            }).eq("id", user_id).execute()
+            print(f"✅ Reset daily trials for user {user_id}")
+    except Exception as e:
+        print(f"❌ Error in check_and_reset_daily_trials: {e}")
+
+
 def get_user_free_trials(user_id: int) -> int:
-    """Get remaining free trials for a user"""
+    """Get remaining free trials for a user (initial + daily combined)"""
     supabase = get_supabase()
     if not supabase:
         return 0
     
     try:
-        result = supabase.table("users").select("free_trials").eq("id", user_id).execute()
+        # First check and reset daily trials if needed
+        check_and_reset_daily_trials(user_id)
+        
+        result = supabase.table("users").select("free_trials, daily_trials").eq("id", user_id).execute()
         if result.data and len(result.data) > 0:
-            return result.data[0].get("free_trials", 0) or 0
+            free_trials = result.data[0].get("free_trials", 0) or 0
+            daily_trials = result.data[0].get("daily_trials", 0) or 0
+            return free_trials + daily_trials  # Total available trials
         return 0
     except Exception as e:
         print(f"❌ Error in get_user_free_trials: {e}")
@@ -197,30 +228,42 @@ def get_user_free_trials(user_id: int) -> int:
 
 
 def use_free_trial(user_id: int) -> Dict[str, Any]:
-    """Use one free trial for a user. Returns success status and remaining trials."""
+    """
+    Use one free trial for a user.
+    Priority: 1. Initial free_trials (10), 2. Daily trials (5)
+    """
     supabase = get_supabase()
     if not supabase:
         return {"success": False, "error": "Database not configured", "remaining": 0}
     
     try:
+        # Check and reset daily trials first
+        check_and_reset_daily_trials(user_id)
+        
         # Get current trials
-        result = supabase.table("users").select("free_trials").eq("id", user_id).execute()
+        result = supabase.table("users").select("free_trials, daily_trials").eq("id", user_id).execute()
         if not result.data or len(result.data) == 0:
             return {"success": False, "error": "User not found", "remaining": 0}
         
-        current_trials = result.data[0].get("free_trials", 0) or 0
+        free_trials = result.data[0].get("free_trials", 0) or 0
+        daily_trials = result.data[0].get("daily_trials", 0) or 0
         
-        if current_trials <= 0:
+        total = free_trials + daily_trials
+        if total <= 0:
             return {"success": False, "error": "No free trials remaining", "remaining": 0}
         
-        # Decrement trials
-        new_count = current_trials - 1
-        supabase.table("users").update({
-            "free_trials": new_count,
-            "updated_at": datetime.now().isoformat()
-        }).eq("id", user_id).execute()
+        # Priority: use initial free_trials first, then daily_trials
+        update_data = {"updated_at": datetime.now().isoformat()}
+        if free_trials > 0:
+            update_data["free_trials"] = free_trials - 1
+            new_total = (free_trials - 1) + daily_trials
+        else:
+            update_data["daily_trials"] = daily_trials - 1
+            new_total = free_trials + (daily_trials - 1)
         
-        return {"success": True, "remaining": new_count}
+        supabase.table("users").update(update_data).eq("id", user_id).execute()
+        
+        return {"success": True, "remaining": new_total}
     except Exception as e:
         print(f"❌ Error in use_free_trial: {e}")
         return {"success": False, "error": str(e), "remaining": 0}

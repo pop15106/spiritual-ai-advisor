@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(255),
     avatar_url TEXT,
     api_key TEXT,
-    free_trials INTEGER DEFAULT 10,
+    free_trials INTEGER DEFAULT 10,         -- 初始註冊獎勵（用完後不會重置）
+    daily_trials INTEGER DEFAULT 5,         -- 每日免費次數
+    last_reset_date DATE DEFAULT CURRENT_DATE,  -- 上次重置日期
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
