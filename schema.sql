@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(255),
     avatar_url TEXT,
     api_key TEXT,
+    free_trials INTEGER DEFAULT 10,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

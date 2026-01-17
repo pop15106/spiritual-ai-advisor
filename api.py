@@ -2368,6 +2368,35 @@ def delete_reading_endpoint(user, reading_id):
     return jsonify({"success": False, "error": "刪除失敗"}), 500
 
 
+# ========== Free Trial Endpoints ==========
+
+@app.route('/api/user/trials', methods=['GET'])
+@user_required
+def get_user_trials(user):
+    """Get remaining free trials for logged-in user"""
+    from db import get_user_free_trials
+    
+    trials = get_user_free_trials(user["user_id"])
+    return jsonify({
+        "success": True,
+        "freeTrials": trials
+    })
+
+
+@app.route('/api/user/trials/use', methods=['POST'])
+@user_required
+def use_user_trial(user):
+    """Use one free trial for logged-in user"""
+    from db import use_free_trial
+    
+    result = use_free_trial(user["user_id"])
+    return jsonify({
+        "success": result["success"],
+        "remaining": result["remaining"],
+        "error": result.get("error")
+    })
+
+
 if __name__ == '__main__':
     print("Starting Spiritual AI Advisor API...")
     print("API running at http://localhost:5000")

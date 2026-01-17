@@ -176,3 +176,52 @@ def get_reading_count(user_id: int) -> Dict[str, int]:
     except Exception as e:
         print(f"❌ Error in get_reading_count: {e}")
         return {}
+
+
+# ========== Free Trial Operations ==========
+
+def get_user_free_trials(user_id: int) -> int:
+    """Get remaining free trials for a user"""
+    supabase = get_supabase()
+    if not supabase:
+        return 0
+    
+    try:
+        result = supabase.table("users").select("free_trials").eq("id", user_id).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0].get("free_trials", 0) or 0
+        return 0
+    except Exception as e:
+        print(f"❌ Error in get_user_free_trials: {e}")
+        return 0
+
+
+def use_free_trial(user_id: int) -> Dict[str, Any]:
+    """Use one free trial for a user. Returns success status and remaining trials."""
+    supabase = get_supabase()
+    if not supabase:
+        return {"success": False, "error": "Database not configured", "remaining": 0}
+    
+    try:
+        # Get current trials
+        result = supabase.table("users").select("free_trials").eq("id", user_id).execute()
+        if not result.data or len(result.data) == 0:
+            return {"success": False, "error": "User not found", "remaining": 0}
+        
+        current_trials = result.data[0].get("free_trials", 0) or 0
+        
+        if current_trials <= 0:
+            return {"success": False, "error": "No free trials remaining", "remaining": 0}
+        
+        # Decrement trials
+        new_count = current_trials - 1
+        supabase.table("users").update({
+            "free_trials": new_count,
+            "updated_at": datetime.now().isoformat()
+        }).eq("id", user_id).execute()
+        
+        return {"success": True, "remaining": new_count}
+    except Exception as e:
+        print(f"❌ Error in use_free_trial: {e}")
+        return {"success": False, "error": str(e), "remaining": 0}
+
