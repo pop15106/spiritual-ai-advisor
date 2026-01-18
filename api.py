@@ -536,7 +536,34 @@ def calculate_bazi():
                 score += 0.5
             liunian.append({"year": y, "ganzhi": y_ganzhi, "score": round(min(score, 10), 1)})
         
-        prompt = f"作為專業的八字命理師，請根據以下八字命盤提供簡短但專業的分析：\n\n八字命盤：\n年柱：{year_gan}{year_zhi}\n月柱：{month_gan}{month_zhi}\n日柱：{day_gan}{day_zhi}（日主）\n時柱：{hour_gan}{hour_zhi}\n\n農曆：{lunar_str}\n\n請提供：\n1. 日主分析（50字內）\n2. 五行強弱（50字內）\n3. 性格特質（80字內）\n4. 今年運勢建議（80字內）\n\n請用繁體中文回答，格式簡潔。"
+        prompt = f"""作為專業的八字命理師，請根據以下八字命盤提供完整且深度的分析報告：
+
+八字命盤：
+【年柱】{year_gan}{year_zhi}
+【月柱】{month_gan}{month_zhi}
+【日柱】{day_gan}{day_zhi}（日主：{day_gan}）
+【時柱】{hour_gan}{hour_zhi}
+
+農曆：{lunar_str}
+
+請提供約 600-800 字的詳細分析，需包含以下章節：
+
+### 1. 命盤格局 (Paipan)
+請詳細解析此命造的格局（如：建祿格、傷官配印等），並說明五行強弱分布及喜用神建議。
+
+### 2. 性格特質深度剖析
+從日主及格局出發，深度分析其內在性格、優點與潛在盲點。
+
+### 3. 事業與財運方向
+適合從事的行業屬性、職涯發展建議，以及財運起伏的關鍵點。
+
+### 4. 感情與人際關係
+分析感情觀、適合的伴侶類型及人際互動模式。
+
+### 5. 流年運勢與建議 (本年度)
+針對今年的流年運勢給予具體建議與提醒。
+
+請用繁體中文回答，語氣專業、溫暖且具啟發性。"""
         
         fallback = get_default_interpretation(day_gan)
         interpretation, model_used = generate_ai_content(prompt, fallback)
