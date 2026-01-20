@@ -364,6 +364,10 @@ def _generate_ai_content_stream(prompt, fallback_text, api_keys, gemini_models):
             _current_key_index = (_current_key_index + 1) % len(api_keys)
             
         config_attempts += 1
+        
+        # 如果之前有 yield 過內容，發送清空信號
+        if config_attempts > 0:
+            yield "__RESET__"
     
     yield fallback_text
 
@@ -2064,7 +2068,11 @@ def analyze_tarot_stream_v2():
         
         for chunk in generate_ai_content(system_prompt, "", stream=True):
             if chunk:
-                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+                 # 偵測到模型切換信號，發送清空事件
+                 if chunk == "__RESET__":
+                     yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
+                 else:
+                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
                  
         yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
