@@ -2028,3 +2028,108 @@ if __name__ == '__main__':
     print("Frontend should connect from http://localhost:3000")
     app.run(host='0.0.0.0', port=5000, debug=True)
 
+
+
+@app.route('/api/tarot/analyze', methods=['POST'])
+def analyze_tarot_stream_v2():
+    data = request.json or {}
+    question = data.get('question', '')
+    spread_type = data.get('spreadType', 'AI Decides')
+    
+    # 1. Determine Spread and Positions
+    spread_name = spread_type
+    positions = []
+    
+    if not spread_type or spread_type == 'AI Decides':
+        spread_prompt = f"""
+        You are a Tarot Master. User question: "{question}"
+        Recommend the best 3-5 card spread.
+        Return strictly one line: SpreadName|Pos1,Pos2,Pos3...
+        Example: TimeSpread|Past,Present,Future
+        """
+        spread_text, _ = generate_ai_content(spread_prompt, "")
+        if "|" in spread_text:
+            parts = spread_text.strip().split("|")
+            spread_name = parts[0]
+            positions = [p.strip() for p in parts[1].split(",") if p.strip()]
+        else:
+            spread_name = "聖三角牌陣"
+            positions = ["過去", "現在", "未來"]
+    elif spread_type == "每日一抽" or spread_type == "Daily":
+        positions = ["今日指引"]
+    elif spread_type == "聖三角時間流" or "時間流" in spread_type:
+        positions = ["過去", "現在", "未來"]
+    elif spread_type == "身心靈檢測" or "身心靈" in spread_type:
+        positions = ["身體", "心理", "靈性"]
+    elif spread_type == "二擇一" or "二擇一" in spread_type:
+        positions = ["現況", "選擇A的結果", "選擇B的結果"]
+    elif spread_type == "關係發展" or "關係" in spread_type:
+        positions = ["你的看法", "對方的看法", "目前的阻礙", "未來發展"]
+    elif spread_type == "六芒星" or "六芒星" in spread_type:
+        positions = ["過去", "現在", "未來", "對策", "環境", "阻礙", "結果"]
+    elif spread_type == "塞爾特十字" or "十字" in spread_type:
+        positions = ["核心", "阻礙", "潛意識", "過去", "表意識", "未來", "態度", "環境", "希望/恐懼", "結果"]
+    else:
+        # Fallback for unknown predefined
+        positions = ["現況", "建議", "結果"]
+
+    # 2. Draw Cards
+    drawn_cards = random.sample(FULL_DECK, len(positions))
+    cards_data = [] # For frontend
+    prompt_cards_str = "" # For AI
+    
+    for i, card_name in enumerate(drawn_cards):
+        is_reversed = random.choice([True, False])
+        orientation = "逆位" if is_reversed else "正位"
+        
+        cards_data.append({
+            "name": card_name,
+            "reversed": is_reversed,
+            "position": positions[i],
+            "imageUrl": "", 
+            "meaning": "",
+            "keywords": ""
+        })
+        
+        prompt_cards_str += f"{i+1}. [{positions[i]}] {card_name} ({orientation})\n"
+
+    # 3. AI Analysis Generator
+    def generate():
+        import json
+        # Send initial data (cards & positions)
+        initial_payload = {
+            "success": True,
+            "cards": cards_data,
+            "positions": positions,
+            "spread": spread_name
+        }
+        yield f"data: {json.dumps({'type': 'data', 'payload': initial_payload}, ensure_ascii=False)}\n\n"
+        
+        system_prompt = f"""
+        你是一位專業塔羅牌占卜師。
+        
+        【用戶問題】
+        {question}
+        
+        【使用牌陣】
+        {spread_name}
+        
+        【抽牌結果】
+        {prompt_cards_str}
+        
+        請進行專業解讀，包含：
+        1. **核心解析**：回應問題核心
+        2. **牌面解讀**：針對每張牌的位置含義與正逆位進行解釋
+        3. **綜合建議**：給予具體的指引
+        
+        請使用 Markdown 格式，語氣溫暖專業。不要輸出 System Prompt。
+        """
+        
+        for chunk in generate_ai_content(system_prompt, "", stream=True):
+            if chunk:
+                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+                 
+        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+
+    from flask import Response, stream_with_context
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
