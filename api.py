@@ -323,6 +323,7 @@ def _generate_ai_content_stream(prompt, fallback_text, api_keys, gemini_models):
         # 針對每一組 (Key, Model) 嘗試 3 次
         MAX_INTERNAL_RETRIES = 3
         for retry in range(MAX_INTERNAL_RETRIES):
+            chunk_count = 0
             try:
                 genai.configure(api_key=current_key)
                 model = genai.GenerativeModel(model_name)
@@ -331,7 +332,6 @@ def _generate_ai_content_stream(prompt, fallback_text, api_keys, gemini_models):
                 response = model.generate_content(prompt, stream=True, generation_config=config)
                 
                 # 測試能否與生成器互動
-                chunk_count = 0
                 for chunk in response:
                     try:
                         if chunk.text:
@@ -347,6 +347,11 @@ def _generate_ai_content_stream(prompt, fallback_text, api_keys, gemini_models):
                     raise ValueError("Empty response received")
 
             except Exception as e:
+                # 如果在這個 retry 中已經輸出過內容，發生錯誤時必須發送 RESET
+                # 否則重試後的內容會直接接在舊內容後面 (導致重複)
+                if chunk_count > 0:
+                    yield "__RESET__"
+
                 is_last_retry = (retry == MAX_INTERNAL_RETRIES - 1)
                 log_prefix = "⚠️ 串流錯誤" if not is_last_retry else "❌ 模型放棄"
                 print(f"{log_prefix} (Key: {current_key[:10]}..., 模型: {model_name}, 重試: {retry+1}/{MAX_INTERNAL_RETRIES}): {e}")
@@ -366,6 +371,7 @@ def _generate_ai_content_stream(prompt, fallback_text, api_keys, gemini_models):
         config_attempts += 1
         
         # 如果之前有 yield 過內容，發送清空信號
+        # 注意：如果 internal retry 已經 yield 過 RESET，這裡再 yield 一次也無妨 (前端會清空兩次)
         if config_attempts > 0:
             yield "__RESET__"
     
@@ -592,7 +598,10 @@ def calculate_bazi():
             yield f"data: {json.dumps({'type': 'data', 'payload': {'chart': chart, 'success': True}}, ensure_ascii=False)}\n\n"
             for chunk in generate_ai_content(prompt, fallback, stream=True):
                 if chunk:
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+                    if chunk == "__RESET__":
+                        yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
         from flask import Response, stream_with_context
@@ -929,7 +938,10 @@ def calculate_human_design():
             # 2. 串流 AI 內容
             for chunk in generate_ai_content(prompt, fallback, stream=True):
                 if chunk:
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+                    if chunk == "__RESET__":
+                        yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             
             # 3. 結束訊號
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
@@ -1395,7 +1407,10 @@ def calculate_astrology():
             yield f"data: {json.dumps({'type': 'data', 'payload': ast_data}, ensure_ascii=False)}\n\n"
             for chunk in generate_ai_content(prompt, fallback, stream=True):
                 if chunk:
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+                    if chunk == "__RESET__":
+                        yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
         from flask import Response, stream_with_context
@@ -1498,7 +1513,10 @@ def calculate_ziwei():
             yield f"data: {json.dumps({'type': 'data', 'payload': {'success': True, **zw_data}}, ensure_ascii=False)}\n\n"
             for chunk in generate_ai_content(prompt, fallback, stream=True):
                 if chunk:
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+                    if chunk == "__RESET__":
+                        yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
         from flask import Response, stream_with_context
@@ -1759,7 +1777,10 @@ After analyzing them separately, now MERGE them in this final section:
         # 注意：此處使用與其他端點一致的 fallback 機制
         for chunk in generate_ai_content(analysis_prompt, AI_INTEGRATION_RESPONSE, stream=True):
             if chunk:
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+                if chunk == "__RESET__":
+                    yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
         
         # 3. 完成
         yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
