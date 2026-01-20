@@ -25,7 +25,13 @@ from bazi_calculator import calculate_bazi_chart
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"], supports_credentials=True)
+CORS(app, origins=[
+    "http://localhost:3000", 
+    "http://127.0.0.1:3000",
+    "https://spiritual-advisor-web.vercel.app",
+    "https://web-production-59825.up.railway.app",
+    "https://web-production-9e44.up.railway.app"
+], supports_credentials=True)
 
 @app.errorhandler(Exception)
 def handle_exception(e):
