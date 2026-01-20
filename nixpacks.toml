@@ -3,9 +3,10 @@
 
 [phases.setup]
 nixPkgs = ["sqlite"]
+aptPkgs = ["libsqlite3-dev", "libsqlite3-0"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt"]
 
 [variables]
-LD_LIBRARY_PATH = "/nix/var/nix/profiles/default/lib"
+LD_LIBRARY_PATH = "/usr/lib/x86_64-linux-gnu:/nix/var/nix/profiles/default/lib"
