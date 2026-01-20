@@ -2146,9 +2146,9 @@ def analyze_tarot_stream_v2():
         
         spread_specific_hint = ""
         if spread_type == "是非題":
-            spread_specific_hint = f"\\n\\n**注意**：這是是非題占卜，判定結果為：{yes_no_result}，請在解讀中說明此判定的原因。"
+            spread_specific_hint = f"\n\n**注意**：這是是非題占卜，判定結果為：{yes_no_result}，請在解讀中說明此判定的原因。"
         elif spread_type == "黃道十二宮":
-            spread_specific_hint = "\\n\\n**注意**：這是年度運勢牌陣，請分別解讀12個宮位，每個宮位約2-3句話。"
+            spread_specific_hint = "\n\n**注意**：這是年度運勢牌陣，請分別解讀12個宮位，每個宮位約2-3句話。"
 
         system_prompt = f"""
         你是一位專業塔羅牌占卜師。
@@ -2161,6 +2161,7 @@ def analyze_tarot_stream_v2():
         
         【抽牌結果】
         {prompt_cards_str}
+        {spread_specific_hint}
         
         請進行專業解讀，包含：
         1. **核心解析**：回應問題核心
