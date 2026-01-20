@@ -1,0 +1,5 @@
+# Railway Nixpacks configuration
+# Adds system dependencies required by Python packages
+
+[phases.setup]
+nixPkgs = ["sqlite", "libsqlite3x"]
