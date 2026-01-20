@@ -2055,20 +2055,41 @@ def analyze_tarot_stream_v2():
         else:
             spread_name = "聖三角牌陣"
             positions = ["過去", "現在", "未來"]
+
+    # Upgraded Existing Spreads (Phase 0)
+    elif spread_type == "二擇一" or "二擇一" in spread_type:
+        positions = ["核心議題", "選擇A的優勢", "選擇A的劣勢", "選擇B的優勢", "選擇B的劣勢"]
+    elif spread_type == "關係發展" or "關係" in spread_type:
+        positions = ["你的看法", "對方的看法", "目前的阻礙", "潛意識影響", "建議行動", "未來發展"]
+
+    # Existing Spreads
     elif spread_type == "每日一抽" or spread_type == "Daily":
         positions = ["今日指引"]
     elif spread_type == "聖三角時間流" or "時間流" in spread_type:
         positions = ["過去", "現在", "未來"]
     elif spread_type == "身心靈檢測" or "身心靈" in spread_type:
         positions = ["身體", "心理", "靈性"]
-    elif spread_type == "二擇一" or "二擇一" in spread_type:
-        positions = ["現況", "選擇A的結果", "選擇B的結果"]
-    elif spread_type == "關係發展" or "關係" in spread_type:
-        positions = ["你的看法", "對方的看法", "目前的阻礙", "未來發展"]
     elif spread_type == "六芒星" or "六芒星" in spread_type:
         positions = ["過去", "現在", "未來", "對策", "環境", "阻礙", "結果"]
     elif spread_type == "塞爾特十字" or "十字" in spread_type:
         positions = ["核心", "阻礙", "潛意識", "過去", "表意識", "未來", "態度", "環境", "希望/恐懼", "結果"]
+
+    # New Spreads (Phase 1)
+    elif spread_type == "是非題":
+        positions = ["牌1", "牌2", "牌3"]
+    elif spread_type == "問題解決":
+        positions = ["問題核心", "阻礙原因", "解決方案"]
+    elif spread_type == "鑽石牌陣":
+        positions = ["現況", "阻礙", "潛力", "解決方案"]
+    elif spread_type == "馬蹄鐵":
+        positions = ["過去", "現在", "未來影響", "建議行動", "周遭環境", "內心態度", "最終結果"]
+    elif spread_type == "戀人金字塔":
+        positions = ["你的現況", "對方現況", "關係核心", "挑戰障礙", "發展建議"]
+    elif spread_type == "心之聲":
+        positions = ["表面情緒", "內心真實想法", "對方感受", "關係動態", "未來發展"]
+    elif spread_type == "黃道十二宮":
+        positions = ["自我(白羊)", "財務(金牛)", "溝通(雙子)", "家庭(巨蟹)", "創意(獅子)", "健康(處女)", "關係(天秤)", "轉化(天蠍)", "旅行(射手)", "事業(摩羯)", "友誼(水瓶)", "靈性(雙魚)"]
+        
     else:
         # Fallback for unknown predefined
         positions = ["現況", "建議", "結果"]
@@ -2078,10 +2099,17 @@ def analyze_tarot_stream_v2():
     cards_data = [] # For frontend
     prompt_cards_str = "" # For AI
     
+    # Phase 1 Task 1.3: Yes/No Logic
+    yes_no_result = None
+    upright_count = 0 
+    
     for i, card_name in enumerate(drawn_cards):
         is_reversed = random.choice([True, False])
         orientation = "逆位" if is_reversed else "正位"
         
+        if not is_reversed:
+             upright_count += 1
+             
         cards_data.append({
             "name": card_name,
             "reversed": is_reversed,
@@ -2093,6 +2121,16 @@ def analyze_tarot_stream_v2():
         
         prompt_cards_str += f"{i+1}. [{positions[i]}] {card_name} ({orientation})\n"
 
+    if spread_type == "是非題":
+        if upright_count == 3:
+            yes_no_result = "✅ 強烈的「是」"
+        elif upright_count == 2:
+            yes_no_result = "👍 傾向「是」"
+        elif upright_count == 1:
+            yes_no_result = "👎 傾向「否」"
+        else:
+            yes_no_result = "❌ 強烈的「否」"
+
     # 3. AI Analysis Generator
     def generate():
         import json
@@ -2101,10 +2139,17 @@ def analyze_tarot_stream_v2():
             "success": True,
             "cards": cards_data,
             "positions": positions,
-            "spread": spread_name
+            "spread": spread_name,
+            "yes_no_result": yes_no_result
         }
         yield f"data: {json.dumps({'type': 'data', 'payload': initial_payload}, ensure_ascii=False)}\n\n"
         
+        spread_specific_hint = ""
+        if spread_type == "是非題":
+            spread_specific_hint = f"\\n\\n**注意**：這是是非題占卜，判定結果為：{yes_no_result}，請在解讀中說明此判定的原因。"
+        elif spread_type == "黃道十二宮":
+            spread_specific_hint = "\\n\\n**注意**：這是年度運勢牌陣，請分別解讀12個宮位，每個宮位約2-3句話。"
+
         system_prompt = f"""
         你是一位專業塔羅牌占卜師。
         
