@@ -3,3 +3,7 @@ python-dotenv
 streamlit
 lunar-python
 plotly
+flask
+flask-cors
+ephem
+kerykeion
