@@ -1793,7 +1793,7 @@ Please analyze the following user context (question, birth data, system data):
 Analysis Guidelines:
 
 **You are an expert Master of Eastern and Western Metaphysics.**
-**DYNAMIC DETAIL LEVEL (MUST FOLLOW):** 用戶選擇了 {num_systems} 個系統。{detail_instruction} 總字數目標：{total_words_hint} 字。
+**DYNAMIC DETAIL LEVEL (MUST FOLLOW):** 用戶選擇了 {num_systems} 個系統。{detail_instruction} 總字數目標：{total_words_hint} 字。(請充分利用 20000 Token 的空間進行深度解析，務必確保內容完整不中斷)
 
 **CRITICAL STRUCTURE INSTRUCTIONS (Follow Strictly):**
 
