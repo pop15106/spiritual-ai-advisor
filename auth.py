@@ -170,13 +170,16 @@ def get_api_key():
     return admin_data.get('api_key', '') if admin_data else ''
 
 def update_api_key(new_key):
-    """更新 API Key"""
+    """更新 API Key (支援多個 Key，用逗號分隔)"""
     admin_data = get_admin_data()
     if admin_data:
         admin_data['api_key'] = new_key
         save_admin_data(admin_data)
-        # 同時更新環境變數
-        os.environ['GEMINI_API_KEY'] = new_key
+        # 同時更新環境變數 (確保 get_api_keys() 能讀取到)
+        os.environ['GOOGLE_API_KEYS'] = new_key
+        os.environ['GOOGLE_API_KEY'] = new_key.split(',')[0].strip() if new_key else ''
+        os.environ['GEMINI_API_KEY'] = new_key.split(',')[0].strip() if new_key else ''
+        print(f"✅ API Key 已更新並即時生效")
     return True
 
 def update_password(new_password):
