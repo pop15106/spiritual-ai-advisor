@@ -29,4 +29,9 @@ ENV PYTHONUNBUFFERED=1
 # Run the application
 # Using the command from Procfile: gunicorn api:app --bind 0.0.0.0:$PORT
 # Note: Railway sets $PORT environment variable automatically
-CMD ["sh", "-c", "gunicorn api:app --bind 0.0.0.0:${PORT:-5000}"]
+# Copy start script and make it executable
+COPY start.sh .
+RUN chmod +x start.sh
+
+# Run the application using the start script
+CMD ["./start.sh"]
