@@ -327,7 +327,7 @@ def _generate_ai_content_stream(prompt, fallback_text, api_keys, gemini_models):
                 genai.configure(api_key=current_key)
                 model = genai.GenerativeModel(model_name)
                 # Increase output length limit
-                config = genai.types.GenerationConfig(max_output_tokens=16384, temperature=0.8)
+                config = genai.types.GenerationConfig(max_output_tokens=8192, temperature=0.7)
                 response = model.generate_content(prompt, stream=True, generation_config=config)
                 
                 # 測試能否與生成器互動
