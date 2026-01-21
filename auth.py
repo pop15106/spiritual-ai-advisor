@@ -8,12 +8,20 @@ import jwt
 import hashlib
 import sqlite3
 import os
+import bcrypt
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import request, jsonify
+import logging
+
+logger = logging.getLogger(__name__)
 
 # JWT 密鑰 (生產環境應使用環境變數)
-JWT_SECRET = os.environ.get('JWT_SECRET', 'spiritual-advisor-secret-key-2026')
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET:
+    import secrets
+    JWT_SECRET = secrets.token_hex(32)
+    print("⚠️ 警告: 未設定 JWT_SECRET 環境變數，已自動產生臨時密鑰 (重啟後將失效)")
 JWT_EXPIRY_HOURS = 24
 
 # 資料庫路徑
@@ -82,8 +90,8 @@ def init_db():
     conn.close()
 
 def hash_password(password):
-    """密碼雜湊"""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """密碼雜湊 (使用 bcrypt)"""
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 def get_admin_data():
     """讀取管理員資料"""
@@ -119,8 +127,23 @@ def verify_admin(username, password):
     """驗證管理員帳號密碼"""
     admin_data = get_admin_data()
     if admin_data and admin_data['username'] == username:
-        if admin_data['password_hash'] == hash_password(password):
-            return True
+        stored_hash = admin_data['password_hash']
+        # 向後相容舊的 SHA256 格式
+        if len(stored_hash) == 64 and not stored_hash.startswith('$2b$'): # SHA256 hex length is 64, bcrypt starts with $2b$
+             # 簡單判斷：若長度為64且非bcrypt格式，嘗試 SHA256
+            if stored_hash == hashlib.sha256(password.encode()).hexdigest():
+                # 驗證成功後升級為 bcrypt
+                admin_data['password_hash'] = hash_password(password)
+                save_admin_data(admin_data)
+                print("✅ 密碼已自動升級為 bcrypt 格式")
+                return True
+        else:
+            # bcrypt 格式驗證
+            try:
+                if bcrypt.checkpw(password.encode(), stored_hash.encode()):
+                    return True
+            except Exception:
+                pass
     return False
 
 def generate_token(username):
@@ -179,7 +202,7 @@ def update_api_key(new_key):
         os.environ['GOOGLE_API_KEYS'] = new_key
         os.environ['GOOGLE_API_KEY'] = new_key.split(',')[0].strip() if new_key else ''
         os.environ['GEMINI_API_KEY'] = new_key.split(',')[0].strip() if new_key else ''
-        print(f"✅ API Key 已更新並即時生效")
+        logger.info(f"✅ API Key 已更新並即時生效")
     return True
 
 def update_password(new_password):

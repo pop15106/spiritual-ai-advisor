@@ -25,13 +25,29 @@ from bazi_calculator import calculate_bazi_chart
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=[
-    "http://localhost:3000", 
-    "http://127.0.0.1:3000",
-    "https://spiritual-advisor-web.vercel.app",
-    "https://web-production-59825.up.railway.app",
-    "https://web-production-9e44.up.railway.app"
-], supports_credentials=True)
+
+# 動態 CORS 設定
+def get_cors_origins():
+    """根據環境動態取得 CORS origins"""
+    # 生產環境 origins
+    production_origins = [
+        "https://spiritual-advisor-web.vercel.app",
+        "https://web-production-59825.up.railway.app",
+        "https://web-production-9e44.up.railway.app"
+    ]
+    # 開發環境 origins
+    dev_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ]
+    # 檢查是否為開發環境
+    is_dev = os.environ.get('FLASK_ENV') == 'development' or os.environ.get('DEBUG') == 'true'
+    
+    if is_dev:
+        return production_origins + dev_origins
+    return production_origins
+
+CORS(app, origins=get_cors_origins(), supports_credentials=True)
 
 @app.errorhandler(Exception)
 def handle_exception(e):
