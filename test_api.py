@@ -141,8 +141,9 @@ def test_human_design_calculate():
         response = requests.post(f"{BASE_URL}/api/humandesign/calculate", json=payload, headers=headers, timeout=20)
         if response.status_code == 200:
             data = response.json()
-            hd_type = data.get("type", "")
-            centers = data.get("centers", {})
+            hd_data = data.get("hd_data", {})
+            hd_type = hd_data.get("type", "")
+            centers = hd_data.get("centers", {})
             if hd_type and centers:
                 defined_count = sum(1 for c in centers.values() if c.get("defined"))
                 log_result("人類圖計算 (/api/humandesign/calculate)", True, 
@@ -230,8 +231,9 @@ def test_ziwei_calculate():
         response = requests.post(f"{BASE_URL}/api/ziwei/calculate", json=payload, headers=headers, timeout=15)
         if response.status_code == 200:
             data = response.json()
-            main_star = data.get("main_star", "")
-            palaces = data.get("palaces", {})
+            zw_data = data.get("zw_data", {})
+            main_star = zw_data.get("main_star", "")
+            palaces = zw_data.get("palaces", {})
             if main_star or palaces:
                 log_result("紫微斗數計算 (/api/ziwei/calculate)", True, 
                           details=f"命主星: {main_star}")
@@ -250,9 +252,10 @@ def test_integration():
         headers = {"Content-Type": "application/json"}
         payload = {
             "systems": ["tarot", "bazi", "astrology"],
-            "question": "我的事業發展如何？"
+            "question": "我的事業發展如何？",
+            "stream": False
         }
-        response = requests.post(f"{BASE_URL}/api/integration/analyze", json=payload, headers=headers, timeout=30)
+        response = requests.post(f"{BASE_URL}/api/integration/analyze", json=payload, headers=headers, timeout=60)
         if response.status_code == 200:
             data = response.json()
             analysis = data.get("analysis", "")

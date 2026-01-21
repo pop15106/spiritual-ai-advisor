@@ -21,6 +21,7 @@ from gates_iching_data import GATES_ICHING_DETAILED
 from channels_data import CHANNELS_DATA
 from hd_gate_mapping import CHANNELS_LIST, GATE_TO_CENTER, get_gate_from_longitude
 from bazi_calculator import calculate_bazi_chart
+from template_engine import get_bazi_text, get_tarot_text, get_tarot_spread, get_astrology_text, get_ziwei_text, get_hd_text
 
 load_dotenv()
 
@@ -265,6 +266,7 @@ ZIWEI_DATA = {
     }
 }
 
+    
 AI_INTEGRATION_RESPONSE = """
 > [!WARNING]
 > **AI 服務暫時無法連接**，以下為範例分析資料。請檢查後端日誌或 API 金鑰設定。
@@ -563,7 +565,21 @@ def draw_tarot():
             "keywords": card.get("reversed" if is_reversed else "upright", "")
         })
     
-    return jsonify({"success": True, "cards": result, "positions": ["過去", "現在", "未來"][:count]})
+    
+    # 規則型牌陣選擇
+    spread_name, position_names = get_tarot_spread(request.json.get('question', '一般運勢'))
+
+    # 使用混合引擎生成解讀 (非串流)
+    interpretation, source = get_tarot_text(request.json.get('question', '運勢'), drawn_cards, position_names)
+
+    return jsonify({
+        "success": True, 
+        "cards": result, 
+        "positions": position_names,
+        "spreadName": spread_name,
+        "interpretation": interpretation,
+        "source": source
+    })
 
 
 @app.route('/api/tarot/cards', methods=['GET'])
@@ -597,27 +613,37 @@ def calculate_bazi():
         chart = get_bazi_calculation_result(birth_date, birth_hour, gender)
         pillars = chart['pillars']
         
-        prompt = f"""作為資深八字命理大師，請提供深度命盤分析：
-日主：{chart['day_master']} | 月令：{pillars['month']['zhi']}
-年柱：{pillars['year']['gan']}{pillars['year']['zhi']} | 月柱：{pillars['month']['gan']}{pillars['month']['zhi']}
-日柱：{pillars['day']['gan']}{pillars['day']['zhi']} | 時柱：{pillars['hour']['gan']}{pillars['hour']['zhi']}
-
-請提供包含本命格局、性格天賦、事業財運與感情建議的完整報告。"""
-        
-        fallback = get_default_interpretation(chart['day_master'])
+        # 使用混合引擎 (Bazi)
+        interpretation, source = get_bazi_text(chart)
 
         if not stream:
-            return jsonify({"success": True, "chart": chart, "interpretation": "請使用串流模式"})
+            return jsonify({
+                "success": True, 
+                "chart": chart, 
+                "interpretation": interpretation,
+                "source": source
+            })
 
         def generate():
             import json
             yield f"data: {json.dumps({'type': 'data', 'payload': {'chart': chart, 'success': True}}, ensure_ascii=False)}\n\n"
-            for chunk in generate_ai_content(prompt, fallback, stream=True):
-                if chunk:
-                    if chunk == "__RESET__":
-                        yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
-                    else:
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            
+            # 若是模板來源，模擬串流輸出給前端
+            if source == "template":
+                chunk_size = 50
+                for i in range(0, len(interpretation), chunk_size):
+                    chunk = interpretation[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            else:
+                # 雖然 template_engine 的 AI fallback 目前回傳字串，
+                # 但為了維持架構一致性，我們這裡還是當作普通文字處理。
+                # 如果未來 template_engine 支援 AI 串流，這裡可以改。
+                # 目前統一模擬串流。
+                chunk_size = 50
+                for i in range(0, len(interpretation), chunk_size):
+                    chunk = interpretation[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
         from flask import Response, stream_with_context
@@ -875,40 +901,8 @@ def calculate_human_design():
         channels = hd_data_raw['channels']
         defined_centers = hd_data_raw['defined_centers']
 
-        # AI 解讀
-        prompt = f"""作為專業人類圖分析師，請針對以下個人人類圖表提供一份詳盡且深入的綜合分析報告。請不要只是一句簡短的總結，而是要整合所有資訊，提供使用者實際且具深度的生活指導。
-
-出生時間：{birth_date} {birth_time}
-類型：{hd_type} ({strategy})
-人生角色：{profile}
-內在權威：{authority}
-定義類型：{definition}
-非自我主題：{not_self}
-
-主要定義通道：{", ".join(channels)}
-定義中心：{", ".join(list(defined_centers))}
-
-請撰寫一份約 800-1000 字的完整分析，包含以下章節：
-
-### 1. 核心能量類型與人生策略
-詳細解釋「{hd_type}」的運作機制，以及如何於日常生活中落實「{strategy}」。非自我主題「{not_self}」通常在什麼情況下出現，如何覺察並回到正軌。
-
-### 2. 內在權威指引
-深入說明「{authority}」的運作方式。在做重大決定時，具體應該如何聆聽或觀察這個權威的訊號？請舉例說明。
-
-### 3. 人生角色深度解析
-針對「{profile}」提供性格分析。意識與潛意識的數字如何交互作用？在人際關係與自我實踐上的優勢與挑戰為何？
-
-### 4. 能量中心與通道整合分析
-綜合分析已定義的中心與通道（{", ".join(channels)}）。這些天賦如何互相配合？有哪些特定的才華或原廠設定是使用者應該善用的？（請挑選最重要的 2-3 個特質深入解說）
-
-### 5. 給予當下的生活建議與覺察練習
-給予使用者 3 個具體可行的生活建議，幫助他們活出自己原本的設計。
-
-請用繁體中文，語氣溫暖、賦能且專業。請確保內容結構清晰，分段良好。"""
-
-        # 調用 AI (串流準備)
-        fallback = f"您是{hd_type}，策略是{strategy}。擁有{authority}，人生角色為{profile}。這張圖表顯示了您獨特的能量運作方式。"
+        # 使用混合引擎 (HD)
+        interpretation, source = get_hd_text(hd_type, profile, authority, centers=hd_data_raw['centers'])
         
         # 建立回應資料
         hd_data = {
@@ -931,7 +925,9 @@ def calculate_human_design():
                 "desc": f"類型: {hd_type} | 權威: {authority}",
                 "strategy": strategy,
                 "icon": "🔮"
-            }
+            },
+            "interpretation": interpretation,
+            "source": source
         }
 
         # 支援串流或一般模式
@@ -940,8 +936,9 @@ def calculate_human_design():
         if not stream:
             return jsonify({
                 "success": True, 
-                "hd_data": hd_data, 
-                "interpretation": "請使用串流模式以獲取詳細 AI 解讀"
+                "hd_data": hd_data,
+                "interpretation": interpretation,
+                "source": source
             })
 
         def generate():
@@ -951,13 +948,18 @@ def calculate_human_design():
             payload.update(hd_data)
             yield f"data: {json.dumps({'type': 'data', 'payload': payload}, ensure_ascii=False)}\n\n"
             
-            # 2. 串流 AI 內容
-            for chunk in generate_ai_content(prompt, fallback, stream=True):
-                if chunk:
-                    if chunk == "__RESET__":
-                        yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
-                    else:
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            # 2. 模擬或實際串流
+            if source == "template":
+                chunk_size = 50
+                for i in range(0, len(interpretation), chunk_size):
+                    chunk = interpretation[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            else:
+                 # fallback AI response treatment
+                chunk_size = 50
+                for i in range(0, len(interpretation), chunk_size):
+                    chunk = interpretation[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             
             # 3. 結束訊號
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
@@ -1405,28 +1407,29 @@ def calculate_astrology():
         aspects_str = ", ".join([f"{a['planet1']}{a['aspect']}{a['planet2']}" for a in ast_data['aspects'][:8]])
         patterns_str = ", ".join([p['name'] for p in ast_data['patterns']]) or "無特殊格局"
 
-        prompt = f"""作為專業占星師，請詳細分析此星盤：
-太陽：{sun_sign} | 月亮：{moon_sign} | 上升：{asc_sign}
-相位：{aspects_str}
-格局：{patterns_str}
-
-請提供 800-1000 字分析，包含核心性格、天賦潛能與生活指引。"""
-        
-        fallback = f"太陽{sun_sign}，月亮{moon_sign}，上升{asc_sign}。"
+        # 使用混合引擎 (Astrology)
+        interpretation, source = get_astrology_text(sun_sign, moon_sign, asc_sign)
         
         stream = data.get('stream', False)
         if not stream:
-            return jsonify({**ast_data, "interpretation": "請使用串流模式"})
+            return jsonify({**ast_data, "interpretation": interpretation, "source": source})
 
         def generate():
             import json
             yield f"data: {json.dumps({'type': 'data', 'payload': ast_data}, ensure_ascii=False)}\n\n"
-            for chunk in generate_ai_content(prompt, fallback, stream=True):
-                if chunk:
-                    if chunk == "__RESET__":
-                        yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
-                    else:
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            
+            if source == "template":
+                chunk_size = 50
+                for i in range(0, len(interpretation), chunk_size):
+                    chunk = interpretation[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            else:
+                 # fallback AI response treatment
+                chunk_size = 50
+                for i in range(0, len(interpretation), chunk_size):
+                    chunk = interpretation[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
         from flask import Response, stream_with_context
@@ -1509,30 +1512,37 @@ def calculate_ziwei():
     try:
         zw_data = get_ziwei_calculation_result(birth_date, birth_hour)
         
-        # AI 提示詞
-        ming_stars = zw_data['palaces'].get('命宮', {}).get('stars_str', '無主星')
-        prompt = f"""作為紫微斗數大師，請分析此命盤：
-命宮：{zw_data['ming_palace_dizhi']}宮，主星【{ming_stars}】
-四化：{zw_data['si_hua']}
-五行局：{zw_data['wuxing_ju']}
+        # 準備宮位資料給混合引擎
+        # extract star dictionary for ziwei template engine
+        palaces_for_engine = {}
+        for pname, pdata in zw_data['palaces'].items():
+            stars_list = pdata.get('stars', [])
+            if stars_list:
+                palaces_for_engine[pname] = stars_list[0] # 取第一顆主星 (簡化)
 
-請提供深度批命報告，涵蓋命格總論、事業財富、感情人際與運勢挑戰。"""
-        
-        fallback = f"您的命盤主星為{zw_data['main_star']}，格局{zw_data['wuxing_ju']}。"
-        
+        # 使用混合引擎 (Ziwei)
+        interpretation, source = get_ziwei_text(zw_data['main_star'], palaces_for_engine)
+
         stream = data.get('stream', False)
         if not stream:
-            return jsonify({"success": True, "zw_data": zw_data, "interpretation": "請使用串流模式"})
+            return jsonify({"success": True, "zw_data": zw_data, "interpretation": interpretation, "source": source})
 
         def generate():
             import json
             yield f"data: {json.dumps({'type': 'data', 'payload': {'success': True, **zw_data}}, ensure_ascii=False)}\n\n"
-            for chunk in generate_ai_content(prompt, fallback, stream=True):
-                if chunk:
-                    if chunk == "__RESET__":
-                        yield f"data: {json.dumps({'type': 'reset'}, ensure_ascii=False)}\n\n"
-                    else:
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            
+            if source == "template":
+                chunk_size = 50
+                for i in range(0, len(interpretation), chunk_size):
+                    chunk = interpretation[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            else:
+                 # fallback AI response treatment
+                chunk_size = 50
+                for i in range(0, len(interpretation), chunk_size):
+                    chunk = interpretation[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
         from flask import Response, stream_with_context
@@ -1779,9 +1789,20 @@ After analyzing them separately, now MERGE them in this final section:
     if 'astrology' in system_data:
         res = system_data['astrology']
         system_data['astrology']['summary'] = f"太陽{res['sunSign']}，月亮{res['moonSign']}，上升{res['ascendantSign']}"
-    if 'ziwei' in system_data:
         res = system_data['ziwei']
         system_data['ziwei']['summary'] = f"{res['main_star']}坐命，命盤在{res['ming_palace_dizhi']}"
+
+    # 支援非串流模式
+    stream = data.get('stream', True)
+    if not stream:
+        print("[Integrate] Generating full response (Non-stream)...")
+        # 使用 generate_ai_content (非串流)
+        interpretation, _ = generate_ai_content(analysis_prompt, AI_INTEGRATION_RESPONSE, stream=False)
+        return jsonify({
+            "success": True, 
+            "system_data": system_data, 
+            "analysis": interpretation
+        })
 
     def generate_integration_stream():
         import json
